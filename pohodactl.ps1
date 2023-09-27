@@ -17,6 +17,7 @@ limitations under the License.
 <#
 .SYNOPSIS
     Automates STORMWARE POHODA accounting software.
+    Zabbix discovery is supported.
 
 .DESCRIPTION
     The pohodactl command can list connected clients, start and stop mServers and run automatic tasks.
