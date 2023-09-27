@@ -207,7 +207,7 @@ function Invoke-Sql {
     } else {
         $connectionString = "Data Source=$Server,$Port; " +
             "User ID=$Username; " +
-            "Password=$Password; " +
+            "Password=" + (ConvertFrom-SecureString -SecureString $Password -AsPlainText) + "; " +
             "Initial Catalog=$Database"
     }
     
