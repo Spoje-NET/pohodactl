@@ -156,7 +156,7 @@ function Get-PohodactlConfiguration {
     
     Get-Content $File | ConvertFrom-StringData | ForEach-Object {
         if ($PSItem.Keys.Count -eq 1) {
-            $name = $PSItem.Keys[0] | Select -First 1
+            $name = $PSItem.Keys[0] | Select-Object -First 1
             $config.Add($name, $PSItem[$name])
         }
     }
@@ -345,14 +345,14 @@ function Check-PohodaMserverHealth {
     .OUTPUTS
         bool
     #>
-
+    [OutputType([bool])]
     param(
         # URL of the mServer.
         [Parameter(Mandatory = $true)] [string] $Url,
         # POHODA user name.
         [Parameter(Mandatory = $true)] [string] $User,
         # POHODA user password.
-        [Parameter(Mandatory = $true)] [string] $Password
+        [Parameter(Mandatory = $true)] [securestring] $Password
     )
 
     $authorization = "${User}:$Password"
@@ -433,7 +433,7 @@ function Stop-PohodaMserver {
     
     Start-Process -NoNewWindow -FilePath $Client -ArgumentList @("/http", "stop", $Name, "/f")
 
-    Sleep -Seconds $Wait
+    Start-Sleep -Seconds $Wait
 }
 
 
@@ -466,9 +466,9 @@ if ($Command -eq "client") {
         if ($cfg.ContainsKey("SQLUSER")) {
             # Convert System.String $cfg.SQLUSER to System.Security.SecureString
             $password = ConvertTo-SecureString $cfg.SQLPASSWORD -AsPlainText -Force
-            Get-PohodaActiveClients -SqlServer $cfg.SQLSERVER -Username $cfg.SQLUSER -Password $password | ForEach { [PSCustomObject] $_ } | Format-Table -AutoSize
+            Get-PohodaActiveClients -SqlServer $cfg.SQLSERVER -Username $cfg.SQLUSER -Password $password | ForEach-Object { [PSCustomObject] $_ } | Format-Table -AutoSize
         } else {
-            Get-PohodaActiveClients -SqlServer $cfg.SQLSERVER | ForEach { [PSCustomObject] $_ } | Format-Table -AutoSize
+            Get-PohodaActiveClients -SqlServer $cfg.SQLSERVER | ForEach-Object { [PSCustomObject] $_ } | Format-Table -AutoSize
         }
         exit 0
     } else {
@@ -476,7 +476,7 @@ if ($Command -eq "client") {
     }
 } elseif ($Command -eq "mserver") {
     if ($SubCommand -eq "discovery") {
-        Get-PohodaMservers -Client $cfg.CLIENT -Zabbix $true | ForEach { [PSCustomObject] $_ } | ConvertTo-Json
+        Get-PohodaMservers -Client $cfg.CLIENT -Zabbix $true | ForEach-Object { [PSCustomObject] $_ } | ConvertTo-Json
         exit 0
     } elseif ($SubCommand -eq "start") {
         if ($Argument -eq "") {
@@ -484,7 +484,7 @@ if ($Command -eq "client") {
         }
 
         if ($Argument -eq "*") {
-            Get-PohodaMservers -Client $cfg.CLIENT | ForEach {
+            Get-PohodaMservers -Client $cfg.CLIENT | ForEach-Object {
                 if (-not $_.IsRunning) {
                     Start-PohodaMserver -Client $cfg.CLIENT -Name $_.Name
                 }
@@ -505,9 +505,9 @@ if ($Command -eq "client") {
     } elseif ($SubCommand -eq "status") {
         # If $Argument is json export as JSON, otherwise as table.
         if ($Argument -eq "json") {
-            Get-PohodaMservers -Client $cfg.CLIENT -Zabbix $true | ForEach { [PSCustomObject] $_ } | ConvertTo-Json
+            Get-PohodaMservers -Client $cfg.CLIENT -Zabbix $true | ForEach-Object { [PSCustomObject] $_ } | ConvertTo-Json
         } else {
-            Get-PohodaMservers -Client $cfg.CLIENT | ForEach { [PSCustomObject] $_ } | Format-Table -AutoSize
+            Get-PohodaMservers -Client $cfg.CLIENT | ForEach-Object { [PSCustomObject] $_ } | Format-Table -AutoSize
         }
         exit 0
     } elseif ($SubCommand -eq "health") {
@@ -526,7 +526,7 @@ if ($Command -eq "client") {
         $result = @()
         $code = 0
 
-        Get-PohodaMservers -Client $cfg.CLIENT | ForEach {
+        Get-PohodaMservers -Client $cfg.CLIENT | ForEach-Object {
             if ($Argument -eq "*" -or $_.Name -eq $Argument) {
                 $running = $false
                 $responding = $false
@@ -534,7 +534,7 @@ if ($Command -eq "client") {
                 if ($_.IsRunning) {
                     $running = $true
 
-                    $responding = Check-PohodaMserverHealth -Url $_.Url -User $cfg.PHUSER -Password $cfg.PHPASSWORD
+                    $responding = Check-PohodaMserverHealth -Url $_.Url -User $cfg.PHUSER -Password ConvertTo-SecureString $cfg.PHPASSWORD -AsPlainText -Force
 
                     if (-not $responding) {
                         $code = 1
@@ -551,7 +551,7 @@ if ($Command -eq "client") {
             }
         }
 
-        $result | ForEach { [PSCustomObject] $_ } | Format-Table -AutoSize
+        $result | ForEach-Object { [PSCustomObject] $_ } | Format-Table -AutoSize
 
         exit $code
     } else {
