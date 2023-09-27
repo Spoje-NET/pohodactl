@@ -573,7 +573,7 @@ elseif ($Command -eq "mserver") {
         $code = 0
 
         Get-PohodaMservers -Client $cfg.CLIENT | ForEach-Object {
-            if ($Argument -eq "*" -or $_.Name -eq $Argument) {
+            if ($Argument -eq "*" -or $Argument -eq "json" -or $_.Name -eq $Argument) {
                 $running = $false
                 $responding = $false
 
@@ -601,7 +601,12 @@ elseif ($Command -eq "mserver") {
             }
         }
 
-        $result | ForEach-Object { [PSCustomObject] $_ } | Format-Table -AutoSize
+        if ($Argument -eq "json") {
+            $result | ForEach-Object { [PSCustomObject] $_ } | ConvertTo-Json
+        }
+        else {
+            $result | ForEach-Object { [PSCustomObject] $_ } | Format-Table -AutoSize
+        }
 
         exit $code
     }
