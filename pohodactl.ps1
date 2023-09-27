@@ -464,7 +464,9 @@ if ($Command -eq "client") {
     if ($SubCommand -eq "list-active") {
         # If $cfg.SQLUSER is defined, use it as SQL Server username.
         if ($cfg.ContainsKey("SQLUSER")) {
-            Get-PohodaActiveClients -SqlServer $cfg.SQLSERVER -Username $cfg.SQLUSER -Password $cfg.SQLPASSWORD | ForEach { [PSCustomObject] $_ } | Format-Table -AutoSize
+            # Convert System.String $cfg.SQLUSER to System.Security.SecureString
+            $password = ConvertTo-SecureString $cfg.SQLPASSWORD -AsPlainText -Force
+            Get-PohodaActiveClients -SqlServer $cfg.SQLSERVER -Username $cfg.SQLUSER -Password $password | ForEach { [PSCustomObject] $_ } | Format-Table -AutoSize
         } else {
             Get-PohodaActiveClients -SqlServer $cfg.SQLSERVER | ForEach { [PSCustomObject] $_ } | Format-Table -AutoSize
         }
