@@ -579,8 +579,11 @@ elseif ($Command -eq "mserver") {
 
                 if ($_.IsRunning) {
                     $running = $true
-
-                    $responding = Check-PohodaMserverHealth -Url $_.Url -User $cfg.PHUSER -Password ConvertTo-SecureString $cfg.PHPASSWORD -AsPlainText -Force
+                    if ($PSVersionTable.PSVersion.Major -lt 7) {
+                        $responding = Check-PohodaMserverHealth -Url $_.Url -User $cfg.PHUSER -Password ConvertFrom-SecureString-AsPlainText $cfg.PHPASSWORD -Force
+                    } else {
+                        $responding = Check-PohodaMserverHealth -Url $_.Url -User $cfg.PHUSER -Password ConvertTo-SecureString $cfg.PHPASSWORD -AsPlainText -Force
+                    }
 
                     if (-not $responding) {
                         $code = 1
