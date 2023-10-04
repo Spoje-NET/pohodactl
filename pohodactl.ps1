@@ -17,6 +17,7 @@ limitations under the License.
 <#
 .SYNOPSIS
     Automates STORMWARE POHODA accounting software.
+    Zabbix discovery is supported.
 
 .DESCRIPTION
     The pohodactl command can list connected clients, start and stop mServers and run automatic tasks.
@@ -51,6 +52,8 @@ limitations under the License.
     
     “task run” must be followed by the number of the automatic task you want to run.
 
+    "mserver discovery" outputs a list of mServers in zabbix discovery format.
+
 .PARAMETER Config
     Path to the “pohodactl.conf” configuration file.
 
@@ -68,6 +71,30 @@ limitations under the License.
     Year IsRunning Name     Ico      Url
     ---- --------- ----     ---      ---
     2022      True mserver  12345678 http://WINSERVER:8001
+
+.EXAMPLE
+    PS> .\pohodactl.ps1 mserver status json
+
+    [
+        {
+            "Year":  "2023",
+            "Url":  "http://SE-APP01:50001", 
+            "IsRunning":  true,
+            "Name":  "NOVAK",
+            "Ico":  "12345678"
+        },
+        {
+            "Year":  "2023",
+            "Url":  "http://SE-APP01:50002", 
+            "IsRunning":  true,
+            "Name":  "VITEX",
+            "Ico":  "69438676"
+        }
+    ]
+
+.EXAMPLE
+
+    PS> .\pohodactl.ps1 mserver ldd
 
 .EXAMPLE
     PS> .\pohodactl.ps1 mserver health
@@ -129,8 +156,10 @@ function Get-PohodactlConfiguration {
     $config = @{}
     
     Get-Content $File | ConvertFrom-StringData | ForEach-Object {
-        $name = $PSItem.Keys[0] | Select -First 1
-        $config.Add($name, $PSItem[$name])
+        if ($PSItem.Keys.Count -eq 1) {
+            $name = $PSItem.Keys[0] | Select-Object -First 1
+            $config.Add($name, $PSItem[$name])
+        }
     }
     
     $options = @("SQLSERVER", "CLIENT")
@@ -144,7 +173,28 @@ function Get-PohodactlConfiguration {
     $config
 }
 
+Function ConvertFrom-SecureString-AsPlainText {
+    <#
+.SYNOPSIS
+    Converts a SecureString to plain text.
 
+.DESCRIPTION
+    Backwards compatible version of ConvertFrom-SecureString -AsPlainText, which is not available in PowerShell 2.0.    
+
+#>    
+    [CmdletBinding()]
+    param (
+        [Parameter(
+            Mandatory = $true,
+            ValueFromPipeline = $true
+        )]
+        [System.Security.SecureString]
+        $SecureString
+    )
+    $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecureString);
+    $PlainTextString = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr);
+    $PlainTextString;
+}
 function Invoke-Sql {
     <#
     .SYNOPSIS
@@ -162,12 +212,37 @@ function Invoke-Sql {
         # Database name.
         [Parameter(Mandatory = $true)] [string] $Database,
         # SQL query to execute.
-        [Parameter(Mandatory = $true)] [string] $Query
+        [Parameter(Mandatory = $true)] [string] $Query,
+        # SQL Server username. Default is empty.
+        [Parameter(Mandatory = $false)] [string] $Username = "",
+        # SQL Server password. Default is empty.
+        [Parameter(Mandatory = $false)] [securestring] $Password = "",
+        # SQL Server port. Default is 1433.
+        [Parameter(Mandatory = $false)] [int] $Port = 1433
     )
     
-    $connectionString = "Data Source=$Server; " +
-            "Integrated Security=SSPI; " +
+    # If $Username is empty, use Windows authentication.
+    if ($Username -eq "") {
+        $connectionString = "Data Source=$Server,$Port; " +
+        "Integrated Security=SSPI; " +
+        "Initial Catalog=$Database"
+    }
+    else {
+        # If poweshell version  < 7, use ConvertFrom-SecureString-AsPlainText instead of ConvertFrom-SecureString -AsPlainText
+        if ($PSVersionTable.PSVersion.Major -lt 7) {
+            $connectionString = "Data Source=$Server,$Port; " +
+            "User ID=$Username; " +
+            "Password=" + (ConvertFrom-SecureString-AsPlainText -SecureString $Password) + "; " +
             "Initial Catalog=$Database"
+        }
+        else {
+            $connectionString = "Data Source=$Server,$Port; " +
+            "User ID=$Username; " +
+            "Password=" + (ConvertFrom-SecureString -SecureString $Password -AsPlainText) + "; " +
+            "Initial Catalog=$Database"
+        }
+
+    }
     
     $connection = new-object system.data.SqlClient.SQLConnection($connectionString)
     $command = new-object system.data.sqlclient.sqlcommand($Query, $connection)
@@ -196,26 +271,57 @@ function Get-PohodaActiveClients {
     
     param(
         # SQL Server hostname.
-        [Parameter(Mandatory = $true)] [string] $SqlServer
+        [Parameter(Mandatory = $true)] [string] $SqlServer,
+        # SQL Server username. Default is empty.
+        [Parameter(Mandatory = $false)] [string] $Username = "",
+        # SQL Server password. Default is empty.
+        [Parameter(Mandatory = $false)] [securestring] $Password = ""
     )
     
-    $query = Invoke-Sql -Query "SELECT * FROM dbo.ConnectedUsr;" -Database "StwPh_sys" -Server $SqlServer
+    $query = Invoke-Sql -Query "SELECT * FROM dbo.ConnectedUsr;" -Database "StwPh_sys" -Server $SqlServer -Username $Username -Password $Password
     
     $clients = @()
     
     foreach ($row in $query) {
         $clients += @{
-            Id = $row["ID"];
-            PohodaUser = $row["PhUsr"];
-            Database = $row["Db"];
-            WindowsUser = $row["WinUsr"];
-            Computer = $row["HostName"];
+            Id             = $row["ID"];
+            PohodaUser     = $row["PhUsr"];
+            Database       = $row["Db"];
+            WindowsUser    = $row["WinUsr"];
+            Computer       = $row["HostName"];
             RemoteComputer = $row["TsHostName"];
-            LastActive = $row["LastTime"]
+            LastActive     = $row["LastTime"]
         }
     }
     
     $clients
+}
+
+function Get-PohodaMserverData {
+    <#
+    .SYNOPSIS
+        Returns a list of POHODA mServers and their status data
+    
+    .OUTPUTS
+        System.Collections.ArrayList
+        
+        Pure data from original mserver.xml file.
+    #>
+    
+    param(
+        # Path to Pohoda.exe.
+        [Parameter(Mandatory = $true)] [string] $Client
+    )
+    
+    if (Test-Path "${env:temp}/mserver.xml" -PathType Leaf) {
+        Remove-Item -Force "${env:temp}/mserver.xml"
+    }
+    
+    Start-Process -NoNewWindow -FilePath $Client -ArgumentList @("/http", "list:xml", "${env:temp}/mserver.xml") -Wait
+    
+    [xml] $xml = Get-Content "${env:temp}/mserver.xml"
+    
+    return $xml.mServer.ChildNodes
 }
 
 
@@ -232,32 +338,95 @@ function Get-PohodaMservers {
     
     param(
         # Path to Pohoda.exe.
-        [Parameter(Mandatory = $true)] [string] $Client
+        [Parameter(Mandatory = $true)] [string] $Client,
+        # Option to use zabbix dicovery format. Default is false.
+        [Parameter(Mandatory = $false)] [bool] $Zabbix = $false
     )
+
+    $response = Get-PohodaMserverData -Client $Client
     
-    if (Test-Path "${env:temp}/mserver.xml" -PathType Leaf) {
-        Remove-Item -Force "${env:temp}/mserver.xml"
+   
+    # If $Zabbix is true, return zabbix check format.
+    if ($Zabbix) {
+        foreach ($instance in $response) {
+            if ($instance.running -ieq "true") {
+                $port = $instance.URI.Split(":")[-1];
+            }
+            else {
+                $port = "";
+            }
+            # Port is number after last colon in URI.
+            $mservers += @{ $($instance.name) = @{
+                'run' = $($instance.running) -ieq "true";
+                'ico' = $($instance.company.ico);
+                'year' = $($instance.company.year);
+                'url' = $($instance.URI);
+                'port' = $port
+                }
+            }
+        }
+
     }
-    
-    Start-Process -NoNewWindow -FilePath $Client -ArgumentList @("/http", "list:xml", "${env:temp}/mserver.xml") -Wait
-    
-    [xml] $xml = Get-Content "${env:temp}/mserver.xml"
-    
-    $response = $xml.mServer.ChildNodes
-    
-    $mservers = @()
-    
-    foreach ($instance in $response) {
-        $mservers += @{
-            Name = $($instance.name);
-            IsRunning = $($instance.running) -ieq "true";
-            Ico = $($instance.company.ico);
-            Year = $($instance.company.year);
-            Url = $($instance.URI)
+    else {
+        $mservers = @()
+        foreach ($instance in $response) {
+            $mservers += @{
+                Name      = $($instance.name);
+                IsRunning = $($instance.running) -ieq "true";
+                Ico       = $($instance.company.ico);
+                Year      = $($instance.company.year);
+                Url       = $($instance.URI)
+            }
         }
     }
     
     $mservers
+}
+
+function Get-PohodaMserversLdd {
+    <#
+    .SYNOPSIS
+        Returns a list of POHODA mServers and their status in zabbix discovery format.
+    
+    .OUTPUTS
+        System.Collections.ArrayList
+        
+        List of mServers. Each item will be a HashTable with keys “Name”, “IsRunning”, “Ico”, “Year” and “Url”.
+    #>
+
+    param(
+        # Path to Pohoda.exe.
+        [Parameter(Mandatory = $true)] [string] $Client
+    )
+    
+    $mservers = @()
+    
+    $response = Get-PohodaMserverData -Client $Client
+
+    # If $response is not empty, parse it.
+    if ($response) {
+        foreach ($instance in $response) {
+            if ($instance.running -ieq "true") {
+                $port = $instance.URI.Split(":")[-1];
+            }
+            else {
+                $port = ""; # Unknow port is empty
+            }
+            # Port is number after last colon in URI.
+            $mservers += @{
+                '{#MSRVNAME}' = $($instance.name);
+                '{#MSRV_RUN}' = $($instance.running) -ieq "true";
+                '{#MSRV_ICO}' = $($instance.company.ico);
+                '{#MSRVYEAR}' = $($instance.company.year);
+                '{#MSRV_URL}' = $($instance.URI);
+                '{#MSRVPORT}' = $port;
+            }
+        }
+
+    }
+    
+    # Move $mservers to array branch "data"
+    return @{"data" = $mservers }
 }
 
 
@@ -274,19 +443,19 @@ function Check-PohodaMserverHealth {
     .OUTPUTS
         bool
     #>
-
+    [OutputType([bool])]
     param(
         # URL of the mServer.
         [Parameter(Mandatory = $true)] [string] $Url,
         # POHODA user name.
         [Parameter(Mandatory = $true)] [string] $User,
         # POHODA user password.
-        [Parameter(Mandatory = $true)] [string] $Password
+        [Parameter(Mandatory = $true)] [securestring] $Password
     )
 
     $authorization = "${User}:$Password"
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($authorization)
-    $encoded =[Convert]::ToBase64String($bytes)
+    $encoded = [Convert]::ToBase64String($bytes)
 
     $headers = @{
         "STW-Authorization" = "Basic $encoded"
@@ -295,13 +464,15 @@ function Check-PohodaMserverHealth {
     try {
         $response = Invoke-WebRequest -Uri "$Url/status?companyDetail" -Headers $headers -TimeoutSec 15
         $status = $response.StatusCode
-    } catch {
+    }
+    catch {
         $status = $_.Exception.Response.StatusCode.value__
     }
 
     if ($status -eq 200) {
         return $true
-    } else {
+    }
+    else {
         return $false
     }
 }
@@ -340,7 +511,7 @@ function Start-PohodaMserver {
     
         # Cannot use -Wait in Start-Process, as it would block while the mServer is running.
     
-        Sleep -Seconds $Wait
+        Start-Sleep -Seconds $Wait
     }
 }
 
@@ -362,7 +533,7 @@ function Stop-PohodaMserver {
     
     Start-Process -NoNewWindow -FilePath $Client -ArgumentList @("/http", "stop", $Name, "/f")
 
-    Sleep -Seconds $Wait
+    Start-Sleep -Seconds $Wait
 }
 
 
@@ -391,30 +562,45 @@ $cfg = Get-PohodactlConfiguration $Config
 
 if ($Command -eq "client") {
     if ($SubCommand -eq "list-active") {
-        Get-PohodaActiveClients -SqlServer $cfg.SQLSERVER | ForEach { [PSCustomObject] $_ } | Format-Table -AutoSize
-        
+        # If $cfg.SQLUSER is defined, use it as SQL Server username.
+        if ($cfg.ContainsKey("SQLUSER")) {
+            # Convert System.String $cfg.SQLUSER to System.Security.SecureString
+            $password = ConvertTo-SecureString $cfg.SQLPASSWORD -AsPlainText -Force
+            Get-PohodaActiveClients -SqlServer $cfg.SQLSERVER -Username $cfg.SQLUSER -Password $password | ForEach-Object { [PSCustomObject] $_ } | Format-Table -AutoSize
+        }
+        else {
+            Get-PohodaActiveClients -SqlServer $cfg.SQLSERVER | ForEach-Object { [PSCustomObject] $_ } | Format-Table -AutoSize
+        }
         exit 0
-    } else {
+    }
+    else {
         throw "Unknown subcommand: $SubCommand."
     }
-} elseif ($Command -eq "mserver") {
-    if ($SubCommand -eq "start") {
+}
+elseif ($Command -eq "mserver") {
+    if ($SubCommand -eq "ldd") {
+        Get-PohodaMserversLdd -Client $cfg.CLIENT | ForEach-Object { [PSCustomObject] $_ } | ConvertTo-Json
+        exit 0
+    }
+    elseif ($SubCommand -eq "start") {
         if ($Argument -eq "") {
             $Argument = "*"
         }
 
         if ($Argument -eq "*") {
-            Get-PohodaMservers -Client $cfg.CLIENT | ForEach {
+            Get-PohodaMservers -Client $cfg.CLIENT | ForEach-Object {
                 if (-not $_.IsRunning) {
                     Start-PohodaMserver -Client $cfg.CLIENT -Name $_.Name
                 }
             }
-        } else {
+        }
+        else {
             Start-PohodaMserver -Client $cfg.CLIENT -Name $Argument
         }
 
         exit 0
-    } elseif ($SubCommand -eq "stop") {
+    }
+    elseif ($SubCommand -eq "stop") {
         if ($Argument -eq "") {
             $Argument = "*"
         }
@@ -422,11 +608,18 @@ if ($Command -eq "client") {
         Stop-PohodaMserver -Client $cfg.CLIENT -Name $Argument
         
         exit 0
-    } elseif ($SubCommand -eq "status") {
-        Get-PohodaMservers -Client $cfg.CLIENT | ForEach { [PSCustomObject] $_ } | Format-Table -AutoSize
-        
+    }
+    elseif ($SubCommand -eq "status") {
+        # If $Argument is json export as JSON, otherwise as table.
+        if ($Argument -eq "json") {
+            Get-PohodaMservers -Client $cfg.CLIENT -Zabbix $true | ForEach-Object { [PSCustomObject] $_ } | ConvertTo-Json
+        }
+        else {
+            Get-PohodaMservers -Client $cfg.CLIENT | ForEach-Object { [PSCustomObject] $_ } | Format-Table -AutoSize
+        }
         exit 0
-    } elseif ($SubCommand -eq "health") {
+    }
+    elseif ($SubCommand -eq "health") {
         $requiredCfgOptions = @("PHUSER", "PHPASSWORD")
 
         foreach ($option in $requiredCfgOptions) {
@@ -442,38 +635,50 @@ if ($Command -eq "client") {
         $result = @()
         $code = 0
 
-        Get-PohodaMservers -Client $cfg.CLIENT | ForEach {
-            if ($Argument -eq "*" -or $_.Name -eq $Argument) {
+        Get-PohodaMservers -Client $cfg.CLIENT | ForEach-Object {
+            if ($Argument -eq "*" -or $Argument -eq "json" -or $_.Name -eq $Argument) {
                 $running = $false
                 $responding = $false
 
                 if ($_.IsRunning) {
                     $running = $true
-
-                    $responding = Check-PohodaMserverHealth -Url $_.Url -User $cfg.PHUSER -Password $cfg.PHPASSWORD
+                    if ($PSVersionTable.PSVersion.Major -lt 7) {
+                        $responding = Check-PohodaMserverHealth -Url $_.Url -User $cfg.PHUSER -Password ConvertFrom-SecureString-AsPlainText $cfg.PHPASSWORD -Force
+                    }
+                    else {
+                        $responding = Check-PohodaMserverHealth -Url $_.Url -User $cfg.PHUSER -Password ConvertTo-SecureString $cfg.PHPASSWORD -AsPlainText -Force
+                    }
 
                     if (-not $responding) {
                         $code = 1
                     }
-                } else {
+                }
+                else {
                     $code = 1
                 }
 
                 $result += @{
-                    Name = $_.Name;
-                    IsRunning = $running;
+                    Name         = $_.Name;
+                    IsRunning    = $running;
                     IsResponding = $responding;
                 }
             }
         }
 
-        $result | ForEach { [PSCustomObject] $_ } | Format-Table -AutoSize
+        if ($Argument -eq "json") {
+            $result | ForEach-Object { [PSCustomObject] $_ } | ConvertTo-Json
+        }
+        else {
+            $result | ForEach-Object { [PSCustomObject] $_ } | Format-Table -AutoSize
+        }
 
         exit $code
-    } else {
+    }
+    else {
         throw "Unknown subcommand: $SubCommand."
     }
-} elseif ($Command -eq "task") {
+}
+elseif ($Command -eq "task") {
     if ($SubCommand -eq "run") {
         if ($Argument -eq "") {
             throw "Missing task name."
@@ -482,9 +687,11 @@ if ($Command -eq "client") {
         Invoke-PohodaTask -Client $cfg.CLIENT -Task $Argument
         
         exit 0
-    } else {
+    }
+    else {
         throw "Unknown subcommand: $SubCommand."
     }
-} else {
+}
+else {
     throw "Unknown command: $Command."
 }
