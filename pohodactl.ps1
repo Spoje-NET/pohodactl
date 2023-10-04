@@ -94,7 +94,7 @@ limitations under the License.
 
 .EXAMPLE
 
-    PS> .\pohodactl.ps1 mserver discovery
+    PS> .\pohodactl.ps1 mserver ldd
 
 .EXAMPLE
     PS> .\pohodactl.ps1 mserver health
@@ -297,6 +297,33 @@ function Get-PohodaActiveClients {
     $clients
 }
 
+function Get-PohodaMserverData {
+    <#
+    .SYNOPSIS
+        Returns a list of POHODA mServers and their status data
+    
+    .OUTPUTS
+        System.Collections.ArrayList
+        
+        Pure data from original mserver.xml file.
+    #>
+    
+    param(
+        # Path to Pohoda.exe.
+        [Parameter(Mandatory = $true)] [string] $Client
+    )
+    
+    if (Test-Path "${env:temp}/mserver.xml" -PathType Leaf) {
+        Remove-Item -Force "${env:temp}/mserver.xml"
+    }
+    
+    Start-Process -NoNewWindow -FilePath $Client -ArgumentList @("/http", "list:xml", "${env:temp}/mserver.xml") -Wait
+    
+    [xml] $xml = Get-Content "${env:temp}/mserver.xml"
+    
+    return $xml.mServer.ChildNodes
+}
+
 
 function Get-PohodaMservers {
     <#
@@ -315,20 +342,11 @@ function Get-PohodaMservers {
         # Option to use zabbix dicovery format. Default is false.
         [Parameter(Mandatory = $false)] [bool] $Zabbix = $false
     )
+
+    $response = Get-PohodaMserverData -Client $Client
     
-    if (Test-Path "${env:temp}/mserver.xml" -PathType Leaf) {
-        Remove-Item -Force "${env:temp}/mserver.xml"
-    }
-    
-    Start-Process -NoNewWindow -FilePath $Client -ArgumentList @("/http", "list:xml", "${env:temp}/mserver.xml") -Wait
-    
-    [xml] $xml = Get-Content "${env:temp}/mserver.xml"
-    
-    $response = $xml.mServer.ChildNodes
-    
-    $mservers = @()
-    
-    # If $Zabbix is true, return zabbix discovery format.
+   
+    # If $Zabbix is true, return zabbix check format.
     if ($Zabbix) {
         foreach ($instance in $response) {
             if ($instance.running -ieq "true") {
@@ -336,6 +354,63 @@ function Get-PohodaMservers {
             }
             else {
                 $port = "";
+            }
+            # Port is number after last colon in URI.
+            $mservers += @{ $($instance.name) = @{
+                'run' = $($instance.running) -ieq "true";
+                'ico' = $($instance.company.ico);
+                'year' = $($instance.company.year);
+                'url' = $($instance.URI);
+                'port' = $port
+                }
+            }
+        }
+
+    }
+    else {
+        $mservers = @()
+        foreach ($instance in $response) {
+            $mservers += @{
+                Name      = $($instance.name);
+                IsRunning = $($instance.running) -ieq "true";
+                Ico       = $($instance.company.ico);
+                Year      = $($instance.company.year);
+                Url       = $($instance.URI)
+            }
+        }
+    }
+    
+    $mservers
+}
+
+function Get-PohodaMserversLdd {
+    <#
+    .SYNOPSIS
+        Returns a list of POHODA mServers and their status in zabbix discovery format.
+    
+    .OUTPUTS
+        System.Collections.ArrayList
+        
+        List of mServers. Each item will be a HashTable with keys “Name”, “IsRunning”, “Ico”, “Year” and “Url”.
+    #>
+
+    param(
+        # Path to Pohoda.exe.
+        [Parameter(Mandatory = $true)] [string] $Client
+    )
+    
+    $mservers = @()
+    
+    $response = Get-PohodaMserverData -Client $Client
+
+    # If $response is not empty, parse it.
+    if ($response) {
+        foreach ($instance in $response) {
+            if ($instance.running -ieq "true") {
+                $port = $instance.URI.Split(":")[-1];
+            }
+            else {
+                $port = ""; # Unknow port is empty
             }
             # Port is number after last colon in URI.
             $mservers += @{
@@ -347,23 +422,11 @@ function Get-PohodaMservers {
                 '{#MSRVPORT}' = $port;
             }
         }
+
     }
-    else {
-        foreach ($instance in $response) {
-            $mservers += @{
-                Name      = $($instance.name);
-                IsRunning = $($instance.running) -ieq "true";
-                Ico       = $($instance.company.ico);
-                Year      = $($instance.company.year);
-                Url       = $($instance.URI)
-            }
-        }
-    }
-
-
-
     
-    $mservers
+    # Move $mservers to array branch "data"
+    return @{"data" = $mservers }
 }
 
 
@@ -448,7 +511,7 @@ function Start-PohodaMserver {
     
         # Cannot use -Wait in Start-Process, as it would block while the mServer is running.
     
-        Sleep -Seconds $Wait
+        Start-Sleep -Seconds $Wait
     }
 }
 
@@ -515,8 +578,8 @@ if ($Command -eq "client") {
     }
 }
 elseif ($Command -eq "mserver") {
-    if ($SubCommand -eq "discovery") {
-        Get-PohodaMservers -Client $cfg.CLIENT -Zabbix $true | ForEach-Object { [PSCustomObject] $_ } | ConvertTo-Json
+    if ($SubCommand -eq "ldd") {
+        Get-PohodaMserversLdd -Client $cfg.CLIENT | ForEach-Object { [PSCustomObject] $_ } | ConvertTo-Json
         exit 0
     }
     elseif ($SubCommand -eq "start") {
@@ -581,7 +644,8 @@ elseif ($Command -eq "mserver") {
                     $running = $true
                     if ($PSVersionTable.PSVersion.Major -lt 7) {
                         $responding = Check-PohodaMserverHealth -Url $_.Url -User $cfg.PHUSER -Password ConvertFrom-SecureString-AsPlainText $cfg.PHPASSWORD -Force
-                    } else {
+                    }
+                    else {
                         $responding = Check-PohodaMserverHealth -Url $_.Url -User $cfg.PHUSER -Password ConvertTo-SecureString $cfg.PHPASSWORD -AsPlainText -Force
                     }
 
