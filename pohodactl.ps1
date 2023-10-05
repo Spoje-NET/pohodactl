@@ -94,7 +94,7 @@ limitations under the License.
 
 .EXAMPLE
 
-    PS> .\pohodactl.ps1 mserver ldd
+    PS> .\pohodactl.ps1 mserver lld
 
 .EXAMPLE
     PS> .\pohodactl.ps1 mserver health
@@ -383,7 +383,7 @@ function Get-PohodaMservers {
     $mservers
 }
 
-function Get-PohodaMserversLdd {
+function Get-PohodaMserversLld {
     <#
     .SYNOPSIS
         Returns a list of POHODA mServers and their status in zabbix discovery format.
@@ -578,8 +578,8 @@ if ($Command -eq "client") {
     }
 }
 elseif ($Command -eq "mserver") {
-    if ($SubCommand -eq "ldd") {
-        Get-PohodaMserversLdd -Client $cfg.CLIENT | ForEach-Object { [PSCustomObject] $_ } | ConvertTo-Json
+    if ($SubCommand -eq "lld") {
+        Get-PohodaMserversLld -Client $cfg.CLIENT | ForEach-Object { [PSCustomObject] $_ } | ConvertTo-Json
         exit 0
     }
     elseif ($SubCommand -eq "start") {

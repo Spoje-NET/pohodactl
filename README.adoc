@@ -57,7 +57,7 @@ PS> .\pohodactl.ps1 [COMMAND] [SUBCOMMAND] [ARGUMENT] [OPTIONS]
 |`status`
 |Prints a list of configured mServers and their status. Add `json` option to print the list in Zabbix JSON format.
 
-|`ldd`
+|`lld`
 | Gives you Low Level Discovery json for Zabbix
 
 |`health`
