@@ -113,3 +113,5 @@ IsRunning Name    IsResponding
 --------- ----    ------------
      True mserver         True
 ----
+
+image::examples.png[]
