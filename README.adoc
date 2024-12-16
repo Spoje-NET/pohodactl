@@ -81,6 +81,14 @@ Exit code will be zero if all mServers are running and responding, non-zero othe
 |Requires task number as the argument. Runs the task.
 |===
 
+=== Options
+
+|`-Config`
+|Path to the configuration file.
+
+|`-TempDir`
+|Optional. Specifies the temporary directory to use. Defaults to the system temporary directory if not specified.
+
 === Examples
 
 .List connected users

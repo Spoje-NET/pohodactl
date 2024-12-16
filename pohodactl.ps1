@@ -130,7 +130,8 @@ param(
     [Parameter(Mandatory = $true, Position = 0)] [string] $Command,
     [Parameter(Mandatory = $true, Position = 1)] [string] $SubCommand,
     [Parameter(Mandatory = $false, Position = 2)] [string] $Argument = "",
-    [Parameter(Mandatory = $false)] [string] $Config = ""
+    [Parameter(Mandatory = $false)] [string] $Config = "",
+    [Parameter(Mandatory = $false)] [string] $TempDir = ${env:temp}
 )
 
 if ($Config -eq "") {
@@ -313,13 +314,13 @@ function Get-PohodaMserverData {
         [Parameter(Mandatory = $true)] [string] $Client
     )
     
-    if (Test-Path "${env:temp}/mserver.xml" -PathType Leaf) {
-        Remove-Item -Force "${env:temp}/mserver.xml"
+    if (Test-Path "$TempDir/mserver.xml" -PathType Leaf) {
+        Remove-Item -Force "$TempDir/mserver.xml"
     }
     
-    Start-Process -NoNewWindow -FilePath $Client -ArgumentList @("/http", "list:xml", "${env:temp}/mserver.xml") -Wait
+    Start-Process -NoNewWindow -FilePath $Client -ArgumentList @("/http", "list:xml", "$TempDir/mserver.xml") -Wait
     
-    [xml] $xml = Get-Content "${env:temp}/mserver.xml"
+    [xml] $xml = Get-Content "$TempDir/mserver.xml"
     
     return $xml.mServer.ChildNodes
 }
