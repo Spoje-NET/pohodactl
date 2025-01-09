@@ -350,7 +350,7 @@ function Get-PohodaMservers {
     # If $Zabbix is true, return zabbix check format.
     if ($Zabbix) {
         foreach ($instance in $response) {
-            if ($instance.running -ieq "true") {
+            if ($instance.status -ieq "Running") {
                 $port = $instance.URI.Split(":")[-1];
             }
             else {
@@ -358,7 +358,7 @@ function Get-PohodaMservers {
             }
             # Port is number after last colon in URI.
             $mservers += @{ $($instance.name) = @{
-                'run' = $($instance.running) -ieq "true";
+                'run' = $($instance.status) -ieq "Running";
                 'ico' = $($instance.company.ico);
                 'year' = $($instance.company.year);
                 'url' = $($instance.URI);
@@ -373,7 +373,7 @@ function Get-PohodaMservers {
         foreach ($instance in $response) {
             $mservers += @{
                 Name      = $($instance.name);
-                IsRunning = $($instance.running) -ieq "true";
+                IsRunning = $($instance.status) -ieq "Running";
                 Ico       = $($instance.company.ico);
                 Year      = $($instance.company.year);
                 Url       = $($instance.URI)
